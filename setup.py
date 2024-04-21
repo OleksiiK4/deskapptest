@@ -1,16 +1,12 @@
-import pkg_resources
-from setuptools import setup
-
-from util.fs import PROJECT_ROOT
-
-with open(PROJECT_ROOT.joinpath('requirements.txt'), 'r') as reqs_f:
-    reqs = [str(req) for req in pkg_resources.parse_requirements(reqs_f)]
+from setuptools import setup, find_packages
 
 setup(
         name='deskapptest',
-        install_requires=reqs,
+python_requires=">=3.9",
+       install_requires=['airtest==1.3.3', 'pywinauto==0.6.3', 'PyAutoGUI==0.9.54'],
     version='0.0.1',
     description='Wrapper for the stack of pywinauto + airtest + pyautogui to test Windows apps',
     author='Oleksii K',
+    packages=find_packages(),
         )
 
