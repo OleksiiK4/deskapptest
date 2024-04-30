@@ -24,21 +24,21 @@ log.getLogger("airtest").setLevel(log.DEBUG)
 log.getLogger("PIL").setLevel(log.ERROR)
 # pywinauto settings
 Timings.after_sendkeys_key_wait = conf.read_toml(
-    "tool.pywinauto.configuration", "after_sendkeys_key_wait"
+    "pywinauto-configuration", "after_sendkeys_key_wait"
 )
 Timings.after_clickinput_wait = conf.read_toml(
-    "tool.pywinauto.configuration", "after_clickinput_wait"
+    "pywinauto-configuration", "after_clickinput_wait"
 )
 Timings.window_find_timeout = conf.read_toml(
-    "tool.pywinauto.configuration", "window_find_timeout"
+    "pywinauto-configuration", "window_find_timeout"
 )
 Timings.window_find_retry = conf.read_toml(
-    "tool.pywinauto.configuration", "window_find_retry"
+    "pywinauto-configuration", "window_find_retry"
 )
 # airtest settings
-Settings.FIND_TIMEOUT = conf.read_toml("tool.airtest.configuration", "find_timeout")
-Settings.THRESHOLD = conf.read_toml("tool.airtest.configuration", "threshold")
-Settings.CVSTRATEGY = conf.read_toml("tool.airtest.configuration", "cvstrategy")
+Settings.FIND_TIMEOUT = conf.read_toml("airtest-configuration", "find_timeout")
+Settings.THRESHOLD = conf.read_toml("airtest-configuration", "threshold")
+Settings.CVSTRATEGY = conf.read_toml("airtest-configuration", "cvstrategy")
 
 MatchResT = TypedDict(
     "MatchResT",
