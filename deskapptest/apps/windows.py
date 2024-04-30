@@ -1,9 +1,8 @@
 import enum
 import time
-import copy
 import dataclasses
 import psutil
-from typing import Callable, Optional, Union
+from typing import Callable, Optional as Opt, Union
 
 from airtest.core.settings import Settings
 from pywinauto import Application, MatchError, WindowSpecification, Desktop, timings
@@ -14,34 +13,34 @@ from pywinauto.timings import Timings
 from pywinauto.win32_element_info import HwndElementInfo
 
 from .base import App, Window
-from util import TimeoutMs, pollwait
-from util.proc import kill_proc
+from deskapptest.utils import pollwait, proc
 
-WIN_WRAPPER = Union[UIAWrapper, HwndWrapper]
+WinWrapperT = Union[UIAWrapper, HwndWrapper]
+
 
 @dataclasses.dataclass
 class Criteria:
-    class_name: Optional[str] = None
-    class_name_re: Optional[str] = None
-    parent: Optional[str] = None
-    process: Optional[str] = None
-    title: Optional[str] = None
-    title_re: Optional[str] = None
+    class_name: Opt[str] = None
+    class_name_re: Opt[str] = None
+    parent: Opt[str] = None
+    process: Opt[str] = None
+    title: Opt[str] = None
+    title_re: Opt[str] = None
     top_level_only: bool = True
     visible_only: bool = True
     enabled_only: bool = True
-    best_match: Optional[str] = None
-    handle: Optional[str] = None
-    ctrl_index: Optional[str] = None
-    found_index: Optional[str] = None
-    predicate_func: Optional[str] = None
+    best_match: Opt[str] = None
+    handle: Opt[str] = None
+    ctrl_index: Opt[str] = None
+    found_index: Opt[str] = None
+    predicate_func: Opt[str] = None
     active_only: bool = False
-    control_id: Optional[str] = None
-    control_type: Optional[str] = None
-    auto_id: Optional[str] = None
-    framework_id: Optional[str] = None
-    backend: Optional[str] = "uia"
-    depth: Optional[str] = None
+    control_id: Opt[str] = None
+    control_type: Opt[str] = None
+    auto_id: Opt[str] = None
+    framework_id: Opt[str] = None
+    backend: Opt[str] = "uia"
+    depth: Opt[str] = None
 
     @property
     def kwargs(self):
@@ -76,7 +75,7 @@ class WinWindow(Window):
         self._criterias_kwgs = getattr(
             window, "criteria", {}
         )  # Save initial window criterias
-        self._wrapper: Optional[WIN_WRAPPER] = None
+        self._wrapper: Opt[WinWrapperT] = None
         self.airtest_device = False
 
     @property
@@ -90,7 +89,7 @@ class WinWindow(Window):
         return self._window
 
     @property
-    def wrapper(self) -> WIN_WRAPPER:
+    def wrapper(self) -> WinWrapperT:
         if not self._wrapper:
             self._wait()
         assert self._wrapper
@@ -99,14 +98,14 @@ class WinWindow(Window):
     def close(self):
         self.wrapper.close()
 
-    def click(self, **criteria):
-        btn = self.child(**criteria)
-        self.click0(btn)
+    def click(self, criteria: Criteria):
+        btn = self.child(criteria)
+        self.click_wrapper(btn)
         return self
 
-    def click0(self, wrapper: WIN_WRAPPER):
+    def click_wrapper(self, wrapper: WinWrapperT):
         """
-        Click found window wrapper
+        Click wrapper directly
         """
         self.focus()
         try:
@@ -114,44 +113,43 @@ class WinWindow(Window):
         except TypeError:  # Inner issues in pywinauto. Click is performed anyways
             pass
 
-    def is_visible(self, wait_ms=None, retry_ms=None):
+    def _wait(self, *, wait_ms=None, retry_ms=None, state: str = WindowState.all()):
+        """
+        General window wait with pywinauto
+        """
+        wait = wait_ms / 1000 if wait_ms is not None else Timings.window_find_timeout
+        retry = (
+            retry_ms / 1000
+            if retry_ms is not None and retry_ms < wait_ms
+            else Timings.window_find_retry
+        )
+        self._wrapper = self.window_spec.wait(state, timeout=wait, retry_interval=retry)
+        return self
+
+    def is_visible(self, *, wait_ms=None, retry_ms=None):
         try:
             self.wait(wait_ms, retry_ms)
             return True
         except timings.TimeoutError:
             return False
 
-    def is_exist(self, *, wait_ms=None):
-        wait = wait_ms if wait_ms != None else TimeoutMs.mid
+    def is_exist(self, *, wait_ms=None, retry_ms=None):
         try:
-            self.window_spec.wait(WindowState.exists.value, wait / 1000)
+            self._wait(
+                wait_ms=wait_ms, retry_ms=retry_ms, state=WindowState.exists.value
+            )
             return True
         except timings.TimeoutError:
             return False
-
-    def _wait(self, wait_ms=None, retry_ms=None):
-        """
-        General window wait with pywinauto
-        """
-        timeout = wait_ms / 1000 if wait_ms is not None else Timings.window_find_timeout
-        retry_interval = (
-            retry_ms / 1000 if retry_ms is not None else Timings.window_find_retry
-        )
-
-        self._wrapper = self.window_spec.wait(
-            WindowState.all(), timeout=timeout, retry_interval=retry_interval
-        )
-        return self
 
     def wait(self, wait_ms=None, retry_ms=None):
         """
         Customizable wait depending on needs of a window
         """
-        return self._wait(wait_ms, retry_ms)
-
+        return self._wait(wait_ms=wait_ms, retry_ms=retry_ms)
 
     @staticmethod
-    def _best_match(name, window: WIN_WRAPPER):
+    def _best_match(name, window: WinWrapperT):
         for v in window.element_info.__dict__.values():
             try:
                 if name in v:
@@ -159,14 +157,13 @@ class WinWindow(Window):
             except TypeError:  # v is not iterable issues
                 return None
 
-
-    def child_from_wrapper(self, **eleminfo_criteria) -> WindowSpecification:
+    def child_from_wrapper(self, eleminfo_criteria: Criteria) -> WindowSpecification:
         """
         Find child window using children() method from BaseWrapper
 
-        Use when other 'find child' methods fail
+        Try to use :meth:`~windows.WinWindow.child` method first before trying this one.
         """
-        kwargs = copy.deepcopy(eleminfo_criteria)
+        kwargs = eleminfo_criteria.kwargs
 
         def find_child():
             if "auto_id" in kwargs:
@@ -188,18 +185,18 @@ class WinWindow(Window):
         assert child, f"Window with criteria={eleminfo_criteria} not found"
         return Desktop(backend="uia").window(handle=child.handle)
 
-    def child(self, **criteria) -> WIN_WRAPPER:
+    def child(self, criteria: Criteria) -> WinWrapperT:
         if hasattr(self.window_spec, "child_window"):
-            child = self.window_spec.window(**criteria)
+            child = self.window_spec.window(**criteria.kwargs)
         else:
-            child = self.child_from_wrapper(**criteria)
+            child = self.child_from_wrapper(criteria)
         return child.wait(WindowState.all())
 
-    def select_combobox2(self, text, **expand_btn_criteria):
+    def select_combobox(self, text, expand_btn_criteria: Criteria):
         """
         For combobox with separate arrow down (expand) button
         """
-        btn = self.child(**expand_btn_criteria)
+        btn = self.child(expand_btn_criteria)
         btn.click_input()
 
         combotext = btn.element_info.rich_text
@@ -225,18 +222,24 @@ class WinWindow(Window):
                         raise RuntimeError(f"Option={text} not found")
         return self
 
-    def get_input_text(self, **criteria):
-        return self.child(**criteria).element_info.rich_text
+    def get_text(self, criteria: Criteria):
+        return self.child(criteria).element_info.rich_text
 
-    def type_input(self, text, **criteria):
-        input = self.child(**criteria)
-        self.type_input0(text, input)
+    def set_txt(self, text, criteria: Criteria):
+        self.set_text_to_wrapper(text, self.child(criteria))
         return self
 
-    def type_input0(self, text, input: WIN_WRAPPER, *, enter=False):
-        input.set_focus()
-        time.sleep(0.3)  # Respect consequential typing into several inputs
-        input.type_keys(text + ("~" if enter else ""), with_spaces=True)
+    def set_text_to_wrapper(
+        self, text, input_wrapper: WinWrapperT, *, press_enter=False
+    ):
+        """
+        Set text into wrapper input object directly
+        """
+        input_wrapper.set_focus()
+        time.sleep(
+            0.3
+        )  # Minor wait to respect consequential typing into several inputs
+        input_wrapper.type_keys(text + ("~" if press_enter else ""), with_spaces=True)
 
     def focus(self):
         """
@@ -253,15 +256,17 @@ class WinApp(App):
 
     proc_name = None
 
-    def __init__(self, path, wait_ms=None, *, nowait=False):
-        self.path = path
-        self.app: Optional[Application] = None
+    def __init__(self, app_path, wait_ms=None, *, nowait=False):
+        self.path = app_path
+        self.app: Opt[Application] = None
         self.nowait = nowait
         self.wait_ms = wait_ms
 
     @property
     def main_window(self):
-        assert self.app, "App is not tighted with pywinauto"
+        assert (
+            self.app
+        ), "App object is not open using pywinauto. Use either 'run' or 'connect' methods."
         return WinWindow(self.app.top_window())
 
     def run(self, **kwargs):
@@ -280,7 +285,7 @@ class WinApp(App):
 
     def _close_proc(self, proc_name):
         try:
-            kill_proc(proc_name)
+            proc.kill_proc(proc_name)
         except psutil.NoSuchProcess:
             pass
         # Static time for safety reason, helps work correctly with other apps after close
@@ -293,8 +298,8 @@ class WinApp(App):
 
 def find_window(
     *,
-    wrapper_predicate: Optional[Callable[[HwndElementInfo], bool]] = None,
-    criteria: Optional[Criteria] = None,
+    wrapper_predicate: Opt[Callable[[HwndElementInfo], bool]] = None,
+    criteria: Opt[Criteria] = None,
 ) -> WindowSpecification:
     criteria = criteria or Criteria()
 
