@@ -12,7 +12,7 @@ from pywinauto.findwindows import find_elements
 from pywinauto.timings import Timings
 from pywinauto.win32_element_info import HwndElementInfo
 
-from .base import App, Window
+from .base import App as _App
 from deskapptest.utils import wait, proc
 
 WinWrapperT = Union[UIAWrapper, HwndWrapper]
@@ -39,7 +39,6 @@ class Criteria:
     control_type: Opt[str] = None
     auto_id: Opt[str] = None
     framework_id: Opt[str] = None
-    backend: Opt[str] = "uia"
     depth: Opt[str] = None
 
     @property
@@ -61,22 +60,35 @@ class WindowState(enum.Enum):
         return self.value
 
 
-class WinWindow(Window):
+class Window:
     """
-    Layer between WindowSpecficiation and window wrapper objects
+    The layer between WindowSpecficiation and window wrapper objects
 
-    - Methods with 0 (like click0) in the end of the name are for use on wrapper objects only
-    - Lazy wait - wait only on action like: click, child
-    - Eague wait - wait()
+    Usage:
+    - Start application
+    Application().start('calc.exe')
+    - Find a window of the open application
+    Window.with_criteria(Criteria(best_match='Calculator')).set_text('2*2=')
     """
 
-    def __init__(self, window: WindowSpecification):
-        self._window = window
+    def __init__(
+        self,
+        window: WindowSpecification,
+        *,
+        wait_ms: Opt[int] = None,
+        retry_ms: Opt[int] = None,
+    ):
+        self.window = window
+        self._wait_ms = wait_ms
+        self._retry_ms = retry_ms
         self._criterias_kwgs = getattr(
             window, "criteria", {}
         )  # Save initial window criterias
         self._wrapper: Opt[WinWrapperT] = None
-        self.airtest_device = False
+
+    @classmethod
+    def with_criteria(cls, criteria: Criteria) -> "Window":
+        return cls(find_window(criteria=criteria))
 
     @property
     def handle(self):
@@ -85,8 +97,8 @@ class WinWindow(Window):
     @property
     def window_spec(self) -> WindowSpecification:
         for i, v in enumerate(self._criterias_kwgs):
-            self._window.criteria[i] = v
-        return self._window
+            self.window.criteria[i] = v
+        return self.window
 
     @property
     def wrapper(self) -> WinWrapperT:
@@ -113,27 +125,39 @@ class WinWindow(Window):
         except TypeError:  # Inner issues in pywinauto. Click is performed anyways
             pass
 
-    def _wait(self, *, wait_ms=None, retry_ms=None, state: str = WindowState.all()):
+    def _wait(
+        self,
+        *,
+        wait_ms: Opt[int] = None,
+        retry_ms: Opt[int] = None,
+        state: str = WindowState.all(),
+    ):
         """
         General window wait with pywinauto
         """
         wait = wait_ms / 1000 if wait_ms is not None else Timings.window_find_timeout
         retry = (
             retry_ms / 1000
-            if retry_ms is not None and retry_ms < wait_ms
+            if retry_ms is not None and retry_ms < wait
             else Timings.window_find_retry
         )
         self._wrapper = self.window_spec.wait(state, timeout=wait, retry_interval=retry)
         return self
 
-    def is_visible(self, *, wait_ms=None, retry_ms=None):
+    def wait(self, *, wait_ms: Opt[int] = None, retry_ms: Opt[int] = None):
+        """
+        Customizable wait depending on needs of a window
+        """
+        return self._wait(wait_ms=wait_ms, retry_ms=retry_ms)
+
+    def is_visible(self, *, wait_ms: Opt[int] = None, retry_ms: Opt[int] = None):
         try:
-            self.wait(wait_ms, retry_ms)
+            self.wait(wait_ms=wait_ms, retry_ms=retry_ms)
             return True
         except timings.TimeoutError:
             return False
 
-    def is_exist(self, *, wait_ms=None, retry_ms=None):
+    def is_exist(self, *, wait_ms: Opt[int] = None, retry_ms: Opt[int] = None):
         try:
             self._wait(
                 wait_ms=wait_ms, retry_ms=retry_ms, state=WindowState.exists.value
@@ -141,12 +165,6 @@ class WinWindow(Window):
             return True
         except timings.TimeoutError:
             return False
-
-    def wait(self, wait_ms=None, retry_ms=None):
-        """
-        Customizable wait depending on needs of a window
-        """
-        return self._wait(wait_ms=wait_ms, retry_ms=retry_ms)
 
     @staticmethod
     def _best_match(name, window: WinWrapperT):
@@ -192,7 +210,7 @@ class WinWindow(Window):
             child = self.child_from_wrapper(criteria)
         return child.wait(WindowState.all())
 
-    def select_combobox(self, text, expand_btn_criteria: Criteria):
+    def select_combobox(self, text: str, expand_btn_criteria: Criteria):
         """
         For combobox with separate arrow down (expand) button
         """
@@ -225,12 +243,13 @@ class WinWindow(Window):
     def get_text(self, criteria: Criteria):
         return self.child(criteria).element_info.rich_text
 
-    def set_txt(self, text, criteria: Criteria):
-        self.set_text_to_wrapper(text, self.child(criteria))
+    def set_text(self, text: str, criteria: Opt[Criteria] = None):
+        wrapper = self.child(criteria) if criteria is not None else self.wrapper
+        self.set_text_to_wrapper(text, wrapper)
         return self
 
     def set_text_to_wrapper(
-        self, text, input_wrapper: WinWrapperT, *, press_enter=False
+        self, text: str, input_wrapper: WinWrapperT, *, press_enter=False
     ):
         """
         Set text into wrapper input object directly
@@ -245,45 +264,53 @@ class WinWindow(Window):
         """
         Focus with lower timeout to not wait for the agent with the hidden (implicit) tracking
         """
-        self._window.wait("visible", Settings.FIND_TIMEOUT).set_focus()
+        self.window.wait("visible", Settings.FIND_TIMEOUT).set_focus()
         return self
 
 
-class WinApp(App):
+class App(_App):
     """
     App class is not an action window by itself by just is needed to connect to the main window
     """
 
     proc_name = None
 
-    def __init__(self, app_path, wait_ms=None, *, nowait=False):
-        self.path = app_path
-        self.app: Opt[Application] = None
-        self.nowait = nowait
-        self.wait_ms = wait_ms
+    def __init__(
+        self,
+        app_exe: str,
+        *,
+        wait_ms: Opt[int] = None,
+        retry_ms: Opt[int] = None,
+        nowait=False,
+    ):
+        self.app_exe = app_exe
+        self.app = None
+        self._nowait = nowait
+        self._wait_ms = wait_ms
+        self._retry_ms = retry_ms
 
     @property
     def main_window(self):
         assert (
             self.app
         ), "App object is not open using pywinauto. Use either 'run' or 'connect' methods."
-        return WinWindow(self.app.top_window())
+        return Window(self.app.top_window())
 
     def run(self, **kwargs):
-        self.app = Application(backend="uia").start(self.path, **kwargs)
+        self.app = Application(backend="uia").start(self.app_exe, **kwargs)
         win = self.main_window
-        if not self.nowait:
-            win = win.wait(wait_ms=self.wait_ms)
+        if not self._nowait:
+            win = win.wait(wait_ms=self._wait_ms, retry_ms=self._retry_ms)
         return win
 
-    def _connect(self, pid: int, **kwargs):
+    def connect(self, pid: int, **kwargs):
         self.app = Application(backend="uia").connect(process=pid, **kwargs)
         win = self.main_window
-        if not self.nowait:
-            win = win.focus().wait(wait_ms=self.wait_ms)
+        if not self._nowait:
+            win = win.focus().wait(wait_ms=self._wait_ms)
         return win
 
-    def _close_proc(self, proc_name):
+    def _close_proc(self, proc_name: str):
         try:
             proc.kill_proc(proc_name)
         except psutil.NoSuchProcess:
@@ -301,6 +328,9 @@ def find_window(
     wrapper_predicate: Opt[Callable[[HwndElementInfo], bool]] = None,
     criteria: Opt[Criteria] = None,
 ) -> WindowSpecification:
+    """
+    Find a Window for the already open application
+    """
     criteria = criteria or Criteria()
 
     def get_elements():

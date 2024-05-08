@@ -55,7 +55,8 @@ class App(abc.ABC):
     def run(self, **kwargs):
         pass
 
-    def connect(self, **kwargs):
+    @abc.abstractmethod
+    def connect(self, pid: int, **kwargs):
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -63,7 +64,7 @@ class App(abc.ABC):
         pass
 
 
-class Window(abc.ABC):
+class Window:
     def click_template(
         self,
         template: Template,
@@ -79,7 +80,7 @@ class Window(abc.ABC):
     def dclick_template(self, template: Template):
         dclick_template(template)
 
-    def set_text(self, template: Template, text):
+    def set_text_template(self, template: Template, text: str):
         set_text(template, text)
         return self
 
