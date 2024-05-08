@@ -13,7 +13,7 @@ from pywinauto.timings import Timings
 from pywinauto.win32_element_info import HwndElementInfo
 
 from .base import App, Window
-from deskapptest.utils import pollwait, proc
+from deskapptest.utils import wait, proc
 
 WinWrapperT = Union[UIAWrapper, HwndWrapper]
 
@@ -181,7 +181,7 @@ class WinWindow(Window):
                         if attr_val == v:
                             return child
 
-        child = pollwait(find_child)
+        child = wait.pollwait(find_child)
         assert child, f"Window with criteria={eleminfo_criteria} not found"
         return Desktop(backend="uia").window(handle=child.handle)
 
@@ -310,6 +310,6 @@ def find_window(
             els = []
         return [e for e in els if wrapper_predicate(e)] if wrapper_predicate else els
 
-    pollwait(get_elements)
+    wait.pollwait(get_elements)
     wrapper = get_elements()[0]
     return Desktop().window(handle=wrapper.handle)
