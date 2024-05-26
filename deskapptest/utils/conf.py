@@ -4,7 +4,9 @@ import configparser
 from pathlib import Path
 from typing import MutableMapping, Optional as Opt, Union
 
-if sys.version_info < (3, 11):
+OLD_PY_VERSION = sys.version_info < (3, 11)
+
+if OLD_PY_VERSION:
     import toml as tomllib
 else:
     import tomllib
@@ -33,7 +35,7 @@ def _getval(conf: Opt[MutableMapping], section: str, prop: str):
 def _get_toml_val(conf, section, prop):
     if not conf.exists():
         return None
-    with open(conf, "r") as f:
+    with open(conf, "r" if OLD_PY_VERSION else "rb") as f:
         local_conf = tomllib.load(f)
     return _getval(local_conf, section, prop)
 
